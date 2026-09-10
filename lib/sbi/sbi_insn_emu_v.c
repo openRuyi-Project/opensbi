@@ -16,6 +16,7 @@
 #include <sbi/riscv_encoding.h>
 #include <sbi/sbi_illegal_insn.h>
 #include <sbi/sbi_trap.h>
+#include <sbi/sbi_vector.h>
 
 /* we need a buffer size of eight times VLEN bits */
 #if CONFIG_EMU_ZVBB_VLEN_128
@@ -1138,9 +1139,7 @@ int sbi_insn_emu_op_v(ulong insn, struct sbi_trap_regs *regs)
 		}
 	}
 
-	if (sbi_regs_from_virt(regs))
-		csr_set(CSR_VSSTATUS, MSTATUS_VS);
-	regs->mstatus |= MSTATUS_VS;
+	SET_VS_DIRTY(regs);
 
 	regs->mepc += 4;
 
