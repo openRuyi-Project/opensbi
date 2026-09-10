@@ -36,6 +36,9 @@
 #include <sbi/sbi_version.h>
 #include <sbi/sbi_unit_test.h>
 
+extern void __sbi_expected_trap(void);
+extern void __sbi_expected_trap_hext(void);
+
 #define BANNER                                              \
 	"   ____                    _____ ____ _____\n"     \
 	"  / __ \\                  / ____|  _ \\_   _|\n"  \
@@ -582,6 +585,10 @@ void __noreturn sbi_init(struct sbi_scratch *scratch)
 	bool coldboot			= false;
 	u32 hartid			= current_hartid();
 	const struct sbi_platform *plat = sbi_platform_ptr(scratch);
+
+	/* Platform hooks may probe CSRs before sbi_hart_init(). */
+	scratch->expected_trap = misa_extension('H') ?
+		(ulong)&__sbi_expected_trap_hext : (ulong)&__sbi_expected_trap;
 
 	switch (scratch->next_mode) {
 	case PRV_M:

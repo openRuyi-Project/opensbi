@@ -98,6 +98,10 @@ unsigned long sbi_scratch_alloc_offset(unsigned long size)
 
 	spin_lock(&extra_lock);
 
+	/* The fixed scratch fields need not end on a cache-line boundary. */
+	extra_offset = (extra_offset + scratch_alloc_align - 1) &
+		       ~(scratch_alloc_align - 1);
+
 	if (SBI_SCRATCH_SIZE < (extra_offset + size))
 		goto done;
 

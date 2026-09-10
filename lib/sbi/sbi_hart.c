@@ -22,11 +22,6 @@
 #include <sbi/sbi_string.h>
 #include <sbi/sbi_trap.h>
 
-extern void __sbi_expected_trap(void);
-extern void __sbi_expected_trap_hext(void);
-
-void (*sbi_hart_expected_trap)(void) = &__sbi_expected_trap;
-
 unsigned long hart_features_offset;
 
 static void mstatus_init(struct sbi_scratch *scratch)
@@ -712,9 +707,6 @@ int sbi_hart_init(struct sbi_scratch *scratch, bool cold_boot)
 	csr_write(CSR_MIP, 0);
 
 	if (cold_boot) {
-		if (misa_extension('H'))
-			sbi_hart_expected_trap = &__sbi_expected_trap_hext;
-
 		hart_features_offset = sbi_scratch_alloc_offset(
 					sizeof(struct sbi_hart_features));
 		if (!hart_features_offset)
