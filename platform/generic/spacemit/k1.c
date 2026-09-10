@@ -8,9 +8,12 @@
  */
 
 #include <platform_override.h>
+#include <sbi/riscv_encoding.h>
 #include <sbi/riscv_io.h>
+#include <sbi/sbi_domain.h>
 #include <sbi/sbi_hsm.h>
 #include <sbi/sbi_system.h>
+#include <sbi/sbi_trap_ldst.h>
 #include <sbi_utils/psci/psci_lib.h>
 #include <sbi_utils/cci/cci.h>
 #include <sbi_utils/psci/plat/arm/common/plat_arm.h>
@@ -222,6 +225,13 @@ static int spacemit_k1_early_init(bool cold_boot)
 #ifdef CONFIG_ARM_SCMI_PROTOCOL_SUPPORT
 		plat_arm_pwrc_setup();
 #endif
+#if defined(CONFIG_PLATFORM_SPACEMIT_K1X)
+		rc = sbi_domain_root_add_memrange(REGISTER_PRESERVATION_BASE,
+					  REGISTER_PRESERVATION_SIZE, PAGE_SIZE,
+					  SBI_DOMAIN_MEMREGION_M_RWX);
+		if (rc)
+			return rc;
+#endif
 	} else {
 #ifdef CONFIG_ARM_PSCI_SUPPORT
 		psci_warmboot_entrypoint();
@@ -259,12 +269,164 @@ static bool spacemit_cold_boot_allowed(u32 hartid)
 	return !hartid;
 }
 
+#if defined(CONFIG_PLATFORM_SPACEMIT_K1X)
+
+#define SV39_VPN_BITS		9
+#define SV39_VPN_MASK		0x1ffUL
+#define SV39_LEVELS		3
+#define SV39_VPN_SHIFT(level)	(PAGE_SHIFT + SV39_VPN_BITS * (level))
+#define PTE_SIZE		8
+#define PTE_V_BIT		BIT(0)
+#define PTE_RWX_MASK		0xeUL
+#define PTE_PPN_SHIFT		10
+
+static unsigned long spacemit_k1_saddr_to_paddr(unsigned long addr)
+{
+	unsigned long satp = csr_read(CSR_SATP);
+	unsigned long mode = (satp & SATP64_MODE) >> SATP64_MODE_SHIFT;
+	unsigned long ppn, vpn[SV39_LEVELS];
+	int level;
+
+	if (mode == SATP_MODE_OFF)
+		return addr;
+	if (mode != SATP_MODE_SV39)
+		return 0;
+
+	ppn = satp & SATP64_PPN;
+	vpn[0] = (addr >> SV39_VPN_SHIFT(2)) & SV39_VPN_MASK;
+	vpn[1] = (addr >> SV39_VPN_SHIFT(1)) & SV39_VPN_MASK;
+	vpn[2] = (addr >> SV39_VPN_SHIFT(0)) & SV39_VPN_MASK;
+
+	for (level = 0; level < SV39_LEVELS; level++) {
+		unsigned long *ptep = (void *)((ppn << PAGE_SHIFT) +
+					       vpn[level] * PTE_SIZE);
+		unsigned long pte = *ptep;
+
+		if (!(pte & PTE_V_BIT))
+			return 0;
+
+		ppn = (pte >> PTE_PPN_SHIFT) & SATP64_PPN;
+		if (pte & PTE_RWX_MASK) {
+			unsigned long off_bits = PAGE_SHIFT +
+				SV39_VPN_BITS * (2 - level);
+			unsigned long off_mask = BIT(off_bits) - 1;
+
+			return (ppn << PAGE_SHIFT) | (addr & off_mask);
+		}
+	}
+
+	return 0;
+}
+
+struct spacemit_k1_addr_range {
+	unsigned long base;
+	unsigned long size;
+};
+
+static const struct spacemit_k1_addr_range spacemit_k1_m_only_ranges[] = {
+	{ PMU_C0_CAPMP_IDLE_CFG1, sizeof(u32) },
+	{ PMU_C0_CAPMP_IDLE_CFG0, 3 * sizeof(u32) },
+	{ PMU_C0_CAPMP_IDLE_CFG2, 2 * sizeof(u32) },
+	{ PMU_CAP_CORE2_IDLE_CFG, 2 * sizeof(u32) },
+	{ PMU_CAP_CORE4_IDLE_CFG, 8 * sizeof(u32) },
+	{ C0_RVBADDR_LO_ADDR, 2 * sizeof(u32) },
+	{ C1_RVBADDR_LO_ADDR, 2 * sizeof(u32) },
+};
+
+static bool spacemit_k1_paddr_is_m_only(unsigned long addr, int len)
+{
+	int i;
+
+	for (i = 0; i < array_size(spacemit_k1_m_only_ranges); i++) {
+		const struct spacemit_k1_addr_range *range =
+			&spacemit_k1_m_only_ranges[i];
+
+		if (addr >= range->base && addr + len <= range->base + range->size)
+			return true;
+	}
+
+	return false;
+}
+
+static bool spacemit_k1_paddr_is_preserved(unsigned long addr, int len)
+{
+	return addr >= REGISTER_PRESERVATION_BASE &&
+		addr + len <= REGISTER_PRESERVATION_BASE +
+			      REGISTER_PRESERVATION_SIZE;
+}
+
+static int spacemit_k1_emulate_load(ulong insn, int rlen, ulong addr,
+				    union sbi_ldst_data *out_val,
+				    struct sbi_trap_context *tcntx)
+{
+	unsigned long paddr = spacemit_k1_saddr_to_paddr(addr);
+
+	if (!paddr || !spacemit_k1_paddr_is_preserved(paddr, rlen) ||
+	    spacemit_k1_paddr_is_m_only(paddr, rlen))
+		return SBI_ENOTSUPP;
+
+	switch (rlen) {
+	case 1:
+		out_val->data_bytes[0] = readb((void *)paddr);
+		break;
+	case 2:
+		out_val->data_u32 = readw((void *)paddr);
+		break;
+	case 4:
+		out_val->data_u32 = readl((void *)paddr);
+		break;
+	case 8:
+		out_val->data_u64 = readq((void *)paddr);
+		break;
+	default:
+		return SBI_EINVAL;
+	}
+
+	return rlen;
+}
+
+static int spacemit_k1_emulate_store(ulong insn, int wlen, ulong addr,
+				     union sbi_ldst_data in_val,
+				     struct sbi_trap_context *tcntx)
+{
+	unsigned long paddr = spacemit_k1_saddr_to_paddr(addr);
+
+	if (!paddr || !spacemit_k1_paddr_is_preserved(paddr, wlen) ||
+	    spacemit_k1_paddr_is_m_only(paddr, wlen))
+		return SBI_ENOTSUPP;
+
+	switch (wlen) {
+	case 1:
+		writeb(in_val.data_bytes[0], (void *)paddr);
+		break;
+	case 2:
+		writew(in_val.data_u32, (void *)paddr);
+		break;
+	case 4:
+		writel(in_val.data_u32, (void *)paddr);
+		break;
+	case 8:
+		writeq(in_val.data_u64, (void *)paddr);
+		break;
+	default:
+		return SBI_EINVAL;
+	}
+
+	return wlen;
+}
+
+#endif
+
 static int spacemit_k1_platform_init(const void *fdt, int nodeoff,
 				     const struct fdt_match *match)
 {
 	generic_platform_ops.early_init = spacemit_k1_early_init;
 	generic_platform_ops.cold_boot_allowed = spacemit_cold_boot_allowed;
 	generic_platform_ops.final_init = spacemit_k1_final_init;
+#if defined(CONFIG_PLATFORM_SPACEMIT_K1X)
+	generic_platform_ops.emulate_load = spacemit_k1_emulate_load;
+	generic_platform_ops.emulate_store = spacemit_k1_emulate_store;
+#endif
 
 	return 0;
 }
