@@ -265,8 +265,11 @@ $(KCONFIG_CONFIG): $(platform_src_dir)/configs/$(PLATFORM_DEFCONFIG)
 	$(CMD_PREFIX)mkdir -p $(KCONFIG_DIR)
 	$(CMD_PREFIX)$(src_dir)/scripts/Kconfiglib/defconfig.py --kconfig $(src_dir)/Kconfig $(platform_src_dir)/configs/$(PLATFORM_DEFCONFIG)
 
+# Kconfiglib keeps auto.conf unchanged when the symbol values match.
+# Update its timestamp so included makefiles do not regenerate forever.
 $(KCONFIG_AUTOCONFIG): $(KCONFIG_CONFIG)
 	$(CMD_PREFIX)$(src_dir)/scripts/Kconfiglib/genconfig.py --header-path $(KCONFIG_AUTOHEADER) --sync-deps $(KCONFIG_DIR) --file-list $(KCONFIG_AUTOLIST) $(src_dir)/Kconfig
+	$(CMD_PREFIX)touch $@
 
 $(KCONFIG_AUTOHEADER): $(KCONFIG_AUTOCONFIG);
 
@@ -597,7 +600,7 @@ $(build_dir)/%.dep: $(src_dir)/%.carray $(KCONFIG_AUTOHEADER)
 	$(call compile_gen_dep,$@,.c,$< $(KCONFIG_AUTOHEADER))
 	$(call compile_gen_dep,$@,.o,$(@:.dep=.c))
 
-$(build_dir)/%.carray.c: $(src_dir)/%.carray $(src_dir)/scripts/carray.sh
+$(build_dir)/%.carray.c: $(src_dir)/%.carray $(src_dir)/scripts/carray.sh $(KCONFIG_AUTOHEADER)
 	$(call compile_carray,$@,$<)
 
 $(build_dir)/%.dep: $(src_dir)/%.c $(KCONFIG_AUTOHEADER)
@@ -625,7 +628,7 @@ $(platform_build_dir)/%.dep: $(platform_src_dir)/%.carray $(KCONFIG_AUTOHEADER)
 	$(call compile_gen_dep,$@,.c,$< $(KCONFIG_AUTOHEADER))
 	$(call compile_gen_dep,$@,.o,$(@:.dep=.c))
 
-$(platform_build_dir)/%.carray.c: $(platform_src_dir)/%.carray $(src_dir)/scripts/carray.sh
+$(platform_build_dir)/%.carray.c: $(platform_src_dir)/%.carray $(src_dir)/scripts/carray.sh $(KCONFIG_AUTOHEADER)
 	$(call compile_carray,$@,$<)
 
 $(platform_build_dir)/%.dep: $(platform_src_dir)/%.c $(KCONFIG_AUTOHEADER)
@@ -668,7 +671,7 @@ $(platform_build_dir)/%.dep: $(src_dir)/%.carray $(KCONFIG_AUTOHEADER)
 	$(call compile_gen_dep,$@,.c,$< $(KCONFIG_AUTOHEADER))
 	$(call compile_gen_dep,$@,.o,$(@:.dep=.c))
 
-$(platform_build_dir)/%.carray.c: $(src_dir)/%.carray $(src_dir)/scripts/carray.sh
+$(platform_build_dir)/%.carray.c: $(src_dir)/%.carray $(src_dir)/scripts/carray.sh $(KCONFIG_AUTOHEADER)
 	$(call compile_carray,$@,$<)
 
 $(platform_build_dir)/%.dep: $(src_dir)/%.c $(KCONFIG_AUTOHEADER)
