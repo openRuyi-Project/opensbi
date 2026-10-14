@@ -14,6 +14,15 @@
 	.align 3
 	.globl _spacemit_k3_warm_start
 _spacemit_k3_warm_start:
+	lla	t0, _spacemit_k3_entry_fault
+	csrw	mtvec, t0
+	csrw	mie, zero
+	call	_spacemit_k3_hart_init
+	j	_start_warm
+
+	/* No stack or AMO before local cache coherency is enabled. */
+	.globl _spacemit_k3_hart_init
+_spacemit_k3_hart_init:
 	/* Program PMA attributes before enabling the caches. */
 	li	t0, (PMACFG0_AUDIO_BUF_FIELD_MASK << \
 		     PMACFG0_AUDIO_BUF_FIELD_SHIFT)
@@ -47,6 +56,24 @@ _spacemit_k3_warm_start:
 	bgeu	t0, t1, 1f
 	li	t0, MISA_EXT_H
 	csrs	misa, t0
+	li	t0, MVMD1_FUSION_TYPE5_DIS
+	csrs	CSR_MVMD1, t0
+	csrwi	CSR_TCMCFG, 1
+	csrsi	CSR_MHCR, 1
 	.word	0x62000073	/* hfence.gvma */
 1:
-	j	_start_warm
+	fence	iorw, iorw
+	ret
+
+	.globl _spacemit_k3_entry_fault
+_spacemit_k3_entry_fault:
+	j	_spacemit_k3_entry_fault
+
+	/* Publish code before a reset hart fetches it without snooping. */
+	.option push
+	.option arch, +zicbom
+	.globl _spacemit_k3_clean_block
+_spacemit_k3_clean_block:
+	cbo.clean (a0)
+	ret
+	.option pop
