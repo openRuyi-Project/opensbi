@@ -137,6 +137,21 @@
 #define PLAT_CCI_K3_CLUSTER3_0_IFACE_IX	5
 #define PLAT_CCI_K3_CLUSTER3_1_IFACE_IX	6
 
+#define CSR_K3_CACHE_OP				0x7c2
+#define CSR_K3_PERF_CTRL			0x7d0
+#define CSR_K3_PREFETCH_CTRL			0x7d1
+#define K3_A100_VECTOR_L1_BYPASS		_BITUL(32)
+#define K3_A100_L2_PREFETCH_DIST		(3 << 10)
+#define K3_ML2HINT_MERGE_DIS			_BITUL(2)
+#define K3_ML2HINT_DEPENDENCY_DIS		_BITUL(3)
+
+/* Stackless context; one complete cache line is published per cluster. */
+#define K3_PREWARM_IDLE				0
+#define K3_PREWARM_VECTOR			1
+#define K3_PREWARM_VECTOR_LO			2
+#define K3_PREWARM_VECTOR_HI			3
+#define K3_PREWARM_WORDS			4
+
 #ifndef __ASSEMBLY__
 int spacemit_k3_prepare_hart(u32 hartid);
 #endif

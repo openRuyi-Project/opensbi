@@ -75,15 +75,15 @@
  * called bit 1 SRAM_PWRDWN, bit 3 WAKE_MCE, and bit 4 MC_SW_REQ).
  */
 /* bit 0: CORE_IDLE - gate core clock externally when core enters WFI */
-#define PMU_AP_IDLE_CORE_IDLE			BIT(0)
+#define PMU_AP_IDLE_CORE_IDLE			_BITUL(0)
 /* bit 1: CORE_PWRDWN - power off core on WFI (requires CORE_IDLE set) */
-#define PMU_AP_IDLE_CORE_PWRDWN			BIT(1)
+#define PMU_AP_IDLE_CORE_PWRDWN			_BITUL(1)
 /* bit 2: Core L1 SRAM Power Down - reserved in K1, used in K3 */
-#define PMU_AP_IDLE_CORE_L1_SRAM_PWRDWN		BIT(2)
+#define PMU_AP_IDLE_CORE_L1_SRAM_PWRDWN		_BITUL(2)
 /* bit 3: MASK_GIC_NIRQ_TO_CORE - mask nIRQ from GIC, auto-cleared by HW on power-down entry */
-#define PMU_AP_IDLE_MASK_GIC_NIRQ		BIT(3)
+#define PMU_AP_IDLE_MASK_GIC_NIRQ		_BITUL(3)
 /* bit 4: MASK_GIC_NFIQ_TO_CORE - mask nFIQ from GIC, auto-cleared by HW on power-down entry */
-#define PMU_AP_IDLE_MASK_GIC_NFIQ		BIT(4)
+#define PMU_AP_IDLE_MASK_GIC_NFIQ		_BITUL(4)
 
 #define PLATFORM_MAX_CPUS_PER_CLUSTER		4
 
