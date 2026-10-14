@@ -10,8 +10,9 @@
 #include <platform_override.h>
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_io.h>
-#include <sbi/sbi_hfence.h>
-#include <sbi/sbi_tlb.h>
+#include <sbi/sbi_error.h>
+#include <sbi/sbi_hart.h>
+#include <sbi/sbi_scratch.h>
 #include <spacemit/k3.h>
 #include <spacemit/k3_asm.h>
 #include <spacemit/spacemit.h>
@@ -26,67 +27,48 @@ static const int cci_map[] = {
 	PLAT_CCI_K3_CLUSTER3_1_IFACE_IX,
 };
 
-/*
- * The boot hart reaches this function before caches are enabled. Secondary
- * harts perform the same setup in _spacemit_k3_warm_start before entering
- * the common warm-boot path.
- */
-static void spacemit_k3_hart_init(u32 hartid)
-{
-	csr_clear(CSR_PMACFG0,
-		  PMACFG0_AUDIO_BUF_FIELD_MASK <<
-		  PMACFG0_AUDIO_BUF_FIELD_SHIFT);
-	csr_set(CSR_PMACFG0,
-		PMACFG0_AUDIO_BUF_ATTR_CACHEABLE <<
-		PMACFG0_AUDIO_BUF_FIELD_SHIFT);
-	csr_clear(CSR_PMACFG0, PMACFG0_XIP_FIELD_CLEAR);
-	csr_set(CSR_PMACFG0, PMACFG0_XIP_ATTR_IO);
-	__sbi_sfence_vma_all();
-
-	csr_set(CSR_ML2SETUP,
-		_BITUL(hartid % PLATFORM_MAX_CPUS_PER_CLUSTER) |
-		ML2SETUP_IPRF | ML2SETUP_TPRF);
-	csr_set(CSR_ML2HINT, ML2HINT_TRACE_TOP_ICGEN);
-	csr_set(CSR_MSETUP, MSETUP_BOOT_FLAGS);
-
-	if (hartid < PLATFORM_A100_FIRST_ID) {
-		/* MISA.H is writable on X100 and not implemented on A100. */
-		csr_set(CSR_MISA, MISA_EXT_H);
-		__sbi_hfence_gvma_all();
-	}
-}
-
-/* The boot hart is already running, so it is never started by the HSM. */
-static void spacemit_k3_keep_boot_hart_powered(void)
-{
-	u32 value;
-
-	value = readl((void *)(unsigned long)PMU_CX_CAPMP_IDLE_CFG0);
-	value &= ~CLUSTER_PWR_DOWN_VALUE;
-	writel(value, (void *)(unsigned long)PMU_CX_CAPMP_IDLE_CFG0);
-
-	value = readl((void *)(unsigned long)PMU_AP_CORE0_IDLE_CFG);
-	value &= ~PMU_AP_IDLE_PWRDOWN_K3_MASK;
-	writel(value, (void *)(unsigned long)PMU_AP_CORE0_IDLE_CFG);
-}
-
 /* Program global state before the HSM starts any secondary hart. */
 static int spacemit_k3_pre_init(void)
 {
+	static const unsigned long vector[] = {
+		C0_RVBADDR_LO_ADDR, C1_RVBADDR_LO_ADDR,
+		C2_RVBADDR_LO_ADDR, C3_RVBADDR_LO_ADDR,
+	};
+	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
 	unsigned long entry = (unsigned long)&_spacemit_k3_warm_start;
+	unsigned long address, end;
 	int i, rc;
 
-	writel((u32)entry, (void *)(unsigned long)C0_RVBADDR_LO_ADDR);
-	writel((u32)(entry >> 32), (void *)(unsigned long)C0_RVBADDR_HI_ADDR);
+	if (!sbi_hart_has_extension(scratch, SBI_HART_EXT_ZICBOM))
+		return SBI_ENOTSUPP;
+	if (!scratch->fw_size || scratch->fw_start > ~0UL - scratch->fw_size)
+		return SBI_EINVAL;
 
-	writel((u32)entry, (void *)(unsigned long)C1_RVBADDR_LO_ADDR);
-	writel((u32)(entry >> 32), (void *)(unsigned long)C1_RVBADDR_HI_ADDR);
+	/* Coreboot loads OpenSBI with caches enabled. A reset hart fetches
+	 * instructions before enabling snooping, so publish the full image.
+	 */
+	end = scratch->fw_start + scratch->fw_size;
+	address = scratch->fw_start & ~63UL;
+	/* Order cached handoff stores before publishing the firmware. */
+	mb();
+	for (;;) {
+		_spacemit_k3_clean_block(address);
+		if (end - address <= 64)
+			break;
+		address += 64;
+	}
+	/* Complete cache publication before installing reset vectors. */
+	mb();
 
-	writel((u32)entry, (void *)(unsigned long)C2_RVBADDR_LO_ADDR);
-	writel((u32)(entry >> 32), (void *)(unsigned long)C2_RVBADDR_HI_ADDR);
-
-	writel((u32)entry, (void *)(unsigned long)C3_RVBADDR_LO_ADDR);
-	writel((u32)(entry >> 32), (void *)(unsigned long)C3_RVBADDR_HI_ADDR);
+	for (i = 0; i < array_size(vector); i++) {
+		writel((u32)entry, (void *)vector[i]);
+		writel((u32)(entry >> 32), (void *)(vector[i] + 4));
+		/* Order vector writes before their readback. */
+		mb();
+		if (readl((void *)vector[i]) != (u32)entry ||
+		    readl((void *)(vector[i] + 4)) != (u32)(entry >> 32))
+			return SBI_EIO;
+	}
 
 	for (i = 0; i < array_size(cci_map); i++) {
 		rc = cci_enable_snoop_dvm_reqs(cci_map, i);
@@ -94,21 +76,21 @@ static int spacemit_k3_pre_init(void)
 			return rc;
 	}
 
-	spacemit_k3_keep_boot_hart_powered();
-	return 0;
+	return spacemit_k3_prepare_hart(current_hartid());
 }
 
 static int spacemit_k3_early_init(bool cold_boot)
 {
 	int rc;
 
-	if (cold_boot) {
-		rc = spacemit_k3_pre_init();
-		if (rc)
-			return rc;
-	}
+	rc = generic_early_init(cold_boot);
+	if (rc)
+		return rc;
 
-	return generic_early_init(cold_boot);
+	if (cold_boot)
+		return spacemit_k3_pre_init();
+
+	return spacemit_k3_prepare_hart(current_hartid());
 }
 
 static bool spacemit_k3_cold_boot_allowed(u32 hartid)
@@ -119,7 +101,7 @@ static bool spacemit_k3_cold_boot_allowed(u32 hartid)
 static int spacemit_k3_platform_init(const void *fdt, int nodeoff,
 				     const struct fdt_match *match)
 {
-	spacemit_k3_hart_init(current_hartid());
+	_spacemit_k3_hart_init();
 	generic_platform_ops.early_init = spacemit_k3_early_init;
 	generic_platform_ops.cold_boot_allowed = spacemit_k3_cold_boot_allowed;
 

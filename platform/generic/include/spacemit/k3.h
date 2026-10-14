@@ -44,6 +44,19 @@
 						 MSETUP_BPE | MSETUP_PFE | \
 						 MSETUP_MME | MSETUP_ECCE)
 
+/* X100 state retained by the native coreboot boot path. */
+#define CSR_MHCR				0x7c1
+#define CSR_TCMCFG				0x5db
+#define CSR_MVMD1				0xbf9
+#define MVMD1_FUSION_TYPE5_DIS			_BITUL(37)
+
+/* Per-core system power-down votes in the main PMU. */
+#define MPMU_BASE				0xd4050000
+#define MPMU_CORE_APCR(hart)			(MPMU_BASE + 0x10c0 + 4 * (hart))
+#define MPMU_CORE_APCR_POWERDOWN_VOTES		(BIT(3) | BIT(13) | \
+	BIT(14) | BIT(19) | BIT(25) | BIT(26) | \
+	BIT(27) | BIT(29) | BIT(31))
+
 /* A100 cores: hart 8-11 belong to C2 cluster, hart 12-15 to C3 cluster */
 #define PMU_CAP_CORE8_WAKEUP			(PMU_AP_BASE + 0x360)
 #define PMU_CAP_CORE9_WAKEUP			(PMU_AP_BASE + 0x364)
@@ -123,5 +136,9 @@
 #define PLAT_CCI_K3_CLUSTER2_1_IFACE_IX	4
 #define PLAT_CCI_K3_CLUSTER3_0_IFACE_IX	5
 #define PLAT_CCI_K3_CLUSTER3_1_IFACE_IX	6
+
+#ifndef __ASSEMBLY__
+int spacemit_k3_prepare_hart(u32 hartid);
+#endif
 
 #endif /* __RISCV_SPACEMIT_K3_H__ */
