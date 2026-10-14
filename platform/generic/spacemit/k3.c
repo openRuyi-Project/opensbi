@@ -71,10 +71,10 @@ static void spacemit_k3_keep_boot_hart_powered(void)
 }
 
 /* Program global state before the HSM starts any secondary hart. */
-static void spacemit_k3_pre_init(void)
+static int spacemit_k3_pre_init(void)
 {
 	unsigned long entry = (unsigned long)&_spacemit_k3_warm_start;
-	int i;
+	int i, rc;
 
 	writel((u32)entry, (void *)(unsigned long)C0_RVBADDR_LO_ADDR);
 	writel((u32)(entry >> 32), (void *)(unsigned long)C0_RVBADDR_HI_ADDR);
@@ -88,16 +88,25 @@ static void spacemit_k3_pre_init(void)
 	writel((u32)entry, (void *)(unsigned long)C3_RVBADDR_LO_ADDR);
 	writel((u32)(entry >> 32), (void *)(unsigned long)C3_RVBADDR_HI_ADDR);
 
-	for (i = 0; i < array_size(cci_map); i++)
-		cci_enable_snoop_dvm_reqs(cci_map, i);
+	for (i = 0; i < array_size(cci_map); i++) {
+		rc = cci_enable_snoop_dvm_reqs(cci_map, i);
+		if (rc)
+			return rc;
+	}
 
 	spacemit_k3_keep_boot_hart_powered();
+	return 0;
 }
 
 static int spacemit_k3_early_init(bool cold_boot)
 {
-	if (cold_boot)
-		spacemit_k3_pre_init();
+	int rc;
+
+	if (cold_boot) {
+		rc = spacemit_k3_pre_init();
+		if (rc)
+			return rc;
+	}
 
 	return generic_early_init(cold_boot);
 }

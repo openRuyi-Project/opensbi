@@ -9,6 +9,6 @@
 #ifndef __RISCV_SPACEMIT_H__
 #define __RISCV_SPACEMIT_H__
 
-void cci_enable_snoop_dvm_reqs(const int *cci_map, unsigned int master_id);
+int cci_enable_snoop_dvm_reqs(const int *cci_map, unsigned int master_id);
 
 #endif

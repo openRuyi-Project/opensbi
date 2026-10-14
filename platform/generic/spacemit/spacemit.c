@@ -9,11 +9,22 @@
 
 #include <platform_override.h>
 #include <sbi/riscv_io.h>
+#include <sbi/sbi_error.h>
+#include <sbi/sbi_timer.h>
 #include <spacemit/common.h>
 
-void cci_enable_snoop_dvm_reqs(const int *cci_map, unsigned int master_id)
+static bool cci_transition_done(void *arg)
 {
+	return !(readl(arg) & CCI_550_STATUS_CHANGE_PENDING);
+}
+
+int cci_enable_snoop_dvm_reqs(const int *cci_map, unsigned int master_id)
+{
+	const struct sbi_timer_device *timer = sbi_timer_get_device();
 	int slave_if_id = cci_map[master_id];
+
+	if (!timer || timer->timer_freq < 1000)
+		return SBI_ENODEV;
 
 	/*
 	 * Enable Snoops and DVM messages, no need for Read/Modify/Write as
@@ -29,8 +40,7 @@ void cci_enable_snoop_dvm_reqs(const int *cci_map, unsigned int master_id)
 	 */
 	mb();
 
-	/* Wait for the dust to settle down */
-	while (readl((void *)(unsigned long)CCI_550_PLATFORM_CCI_ADDR + CCI_550_STATUS) &
-	       CCI_550_STATUS_CHANGE_PENDING)
-		;
+	return sbi_timer_waitms_until(cci_transition_done,
+		(void *)(unsigned long)(CCI_550_PLATFORM_CCI_ADDR + CCI_550_STATUS),
+		1) ? 0 : SBI_ETIMEDOUT;
 }
