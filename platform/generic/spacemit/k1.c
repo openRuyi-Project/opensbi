@@ -22,11 +22,11 @@ static const int cci_map[] = {
 	PLAT_CCI_K1_CLUSTER1_IFACE_IX,
 };
 
-static void spacemit_k1_pre_init(void)
+static int spacemit_k1_pre_init(void)
 {
 	unsigned int clusterid, cluster_enabled = 0;
 	struct sbi_scratch *scratch;
-	int i;
+	int i, rc;
 
 	scratch = sbi_scratch_thishart_ptr();
 
@@ -41,9 +41,12 @@ static void spacemit_k1_pre_init(void)
 
 		if (!(cluster_enabled & (1 << clusterid))) {
 			cluster_enabled |= 1 << clusterid;
-			cci_enable_snoop_dvm_reqs(cci_map, clusterid);
+			rc = cci_enable_snoop_dvm_reqs(cci_map, clusterid);
+			if (rc)
+				return rc;
 		}
 	}
+	return 0;
 }
 
 /*
@@ -61,7 +64,7 @@ static int spacemit_k1_early_init(bool cold_boot)
 		MSETUP_PFE | MSETUP_MME | MSETUP_ECCE);
 
 	if (cold_boot)
-		spacemit_k1_pre_init();
+		return spacemit_k1_pre_init();
 
 	return 0;
 }
