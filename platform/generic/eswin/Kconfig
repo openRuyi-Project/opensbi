@@ -2,9 +2,12 @@
 
 config ESWIN_EIC770X_FEAT0_CFG
 	hex "ESWIN EIC7700X Feature Disable 0 CSR Configuration"
-	default 0x4000
+	default 0xc000
 	help
 	 CSR Value to initialize EIC770X_FEAT0 (0x7c1) with.
+	 The default disables the indirect-jump target predictor and the
+	 next-line predictor. Disabling the latter avoids hard lockups during
+	 repeated KVM entry and exit on P550 cores.
 	 Refer to EIC770X SoC TRM for recommendations.
 
 config ESWIN_EIC770X_FEAT1_CFG
