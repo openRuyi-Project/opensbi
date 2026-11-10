@@ -11,6 +11,7 @@
 #include <sbi/riscv_io.h>
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_hsm.h>
+#include <sbi/sbi_scratch.h>
 #include <spacemit/common.h>
 #include <spacemit/k1.h>
 #include <spacemit/k3.h>
@@ -164,6 +165,9 @@ static const unsigned long k3_core_wakeup_reg[] = {
 static int spacemit_k3_hart_start(u32 hartid, ulong saddr)
 {
 	u32 value;
+
+	if (saddr != sbi_scratch_thishart_ptr()->warmboot_addr)
+		return SBI_EINVAL;
 
 	if (hartid >= array_size(k3_core_wakeup_reg))
 		return SBI_EINVAL;
