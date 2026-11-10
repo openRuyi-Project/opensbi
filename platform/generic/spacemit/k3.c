@@ -27,9 +27,25 @@ static const int cci_map[] = {
 	PLAT_CCI_K3_CLUSTER3_1_IFACE_IX,
 };
 
+static int spacemit_k3_set_vector(unsigned long vector, unsigned long entry)
+{
+	writel((u32)entry, (void *)vector);
+	writel((u32)(entry >> 32), (void *)(vector + 4));
+	/* Order both vector halves before readback and wakeup. */
+	mb();
+	if (readl((void *)vector) != (u32)entry ||
+	    readl((void *)(vector + 4)) != (u32)(entry >> 32))
+		return SBI_EIO;
+	return 0;
+}
+
 /* Program global state before the HSM starts any secondary hart. */
 static int spacemit_k3_pre_init(void)
 {
+	static const unsigned long vector[] = {
+		C0_RVBADDR_LO_ADDR, C1_RVBADDR_LO_ADDR,
+		C2_RVBADDR_LO_ADDR, C3_RVBADDR_LO_ADDR,
+	};
 	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
 	unsigned long entry = (unsigned long)&_spacemit_k3_warm_start;
 	unsigned long address, end;
@@ -56,17 +72,11 @@ static int spacemit_k3_pre_init(void)
 	/* Complete cache publication before installing reset vectors. */
 	mb();
 
-	writel((u32)entry, (void *)(unsigned long)C0_RVBADDR_LO_ADDR);
-	writel((u32)(entry >> 32), (void *)(unsigned long)C0_RVBADDR_HI_ADDR);
-
-	writel((u32)entry, (void *)(unsigned long)C1_RVBADDR_LO_ADDR);
-	writel((u32)(entry >> 32), (void *)(unsigned long)C1_RVBADDR_HI_ADDR);
-
-	writel((u32)entry, (void *)(unsigned long)C2_RVBADDR_LO_ADDR);
-	writel((u32)(entry >> 32), (void *)(unsigned long)C2_RVBADDR_HI_ADDR);
-
-	writel((u32)entry, (void *)(unsigned long)C3_RVBADDR_LO_ADDR);
-	writel((u32)(entry >> 32), (void *)(unsigned long)C3_RVBADDR_HI_ADDR);
+	for (i = 0; i < array_size(vector); i++) {
+		rc = spacemit_k3_set_vector(vector[i], entry);
+		if (rc)
+			return rc;
+	}
 
 	for (i = 0; i < array_size(cci_map); i++) {
 		rc = cci_enable_snoop_dvm_reqs(cci_map, i);
