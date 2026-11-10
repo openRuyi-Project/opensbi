@@ -33,6 +33,10 @@
 /* TCM configuration shared by X100 and A100. */
 #define CSR_TCMCFG				0x5db
 
+/* X100 AI extension control. */
+#define CSR_MHCR				0x7c1
+#define MHCR_AI_ENABLE				_BITUL(0)
+
 /* X100 instruction fusion control. */
 #define CSR_MVMD1				0xbf9
 #define MVMD1_FUSION_TYPE5_DIS			_BITUL(37)

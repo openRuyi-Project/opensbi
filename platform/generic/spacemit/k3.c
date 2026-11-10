@@ -187,6 +187,8 @@ static int spacemit_k3_final_init(bool cold_boot)
 	}
 
 	csr_write(CSR_TCMCFG, 1);
+	if (current_hartid() < PLATFORM_A100_FIRST_ID)
+		csr_set(CSR_MHCR, MHCR_AI_ENABLE);
 	return 0;
 }
 
