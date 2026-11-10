@@ -10,8 +10,6 @@
 #include <platform_override.h>
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_io.h>
-#include <sbi/sbi_hfence.h>
-#include <sbi/sbi_tlb.h>
 #include <spacemit/k3.h>
 #include <spacemit/k3_asm.h>
 #include <spacemit/spacemit.h>
@@ -25,37 +23,6 @@ static const int cci_map[] = {
 	PLAT_CCI_K3_CLUSTER3_0_IFACE_IX,
 	PLAT_CCI_K3_CLUSTER3_1_IFACE_IX,
 };
-
-/*
- * The boot hart reaches this function before caches are enabled. Secondary
- * harts perform the same setup in _spacemit_k3_warm_start before entering
- * the common warm-boot path.
- */
-static void spacemit_k3_hart_init(u32 hartid)
-{
-	csr_clear(CSR_PMACFG0,
-		  PMACFG0_AUDIO_BUF_FIELD_MASK <<
-		  PMACFG0_AUDIO_BUF_FIELD_SHIFT);
-	csr_set(CSR_PMACFG0,
-		PMACFG0_AUDIO_BUF_ATTR_CACHEABLE <<
-		PMACFG0_AUDIO_BUF_FIELD_SHIFT);
-	csr_clear(CSR_PMACFG0, PMACFG0_XIP_FIELD_CLEAR);
-	csr_set(CSR_PMACFG0, PMACFG0_XIP_ATTR_IO);
-	__sbi_sfence_vma_all();
-
-	csr_set(CSR_ML2SETUP,
-		_BITUL(hartid % PLATFORM_MAX_CPUS_PER_CLUSTER) |
-		ML2SETUP_IPRF | ML2SETUP_TPRF);
-	csr_set(CSR_ML2HINT, ML2HINT_TRACE_TOP_ICGEN);
-	csr_set(CSR_MSETUP, MSETUP_BOOT_FLAGS);
-
-	if (hartid < PLATFORM_A100_FIRST_ID) {
-		/* MISA.H is writable on X100 and not implemented on A100. */
-		csr_set(CSR_MISA, MISA_EXT_H);
-		csr_set(CSR_MVMD1, MVMD1_FUSION_TYPE5_DIS);
-		__sbi_hfence_gvma_all();
-	}
-}
 
 /* The boot hart is already running, so it is never started by the HSM. */
 static void spacemit_k3_keep_boot_hart_powered(void)
@@ -120,7 +87,7 @@ static bool spacemit_k3_cold_boot_allowed(u32 hartid)
 static int spacemit_k3_platform_init(const void *fdt, int nodeoff,
 				     const struct fdt_match *match)
 {
-	spacemit_k3_hart_init(current_hartid());
+	_spacemit_k3_hart_init();
 	generic_platform_ops.early_init = spacemit_k3_early_init;
 	generic_platform_ops.cold_boot_allowed = spacemit_k3_cold_boot_allowed;
 
