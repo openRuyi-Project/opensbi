@@ -50,16 +50,26 @@ _spacemit_k3_hart_init:
 	li	t0, MSETUP_BOOT_FLAGS
 	csrs	CSR_MSETUP, t0
 
-	/* Enable H before common code selects the per-hart trap entry. */
+	/* Restore core-specific settings on both boot and reset entry. */
 	csrr	t0, mhartid
 	li	t1, PLATFORM_A100_FIRST_ID
 	bgeu	t0, t1, 1f
+	/* Enable H before common code selects the per-hart trap entry. */
 	li	t0, MISA_EXT_H
 	csrs	misa, t0
 	li	t0, MVMD1_FUSION_TYPE5_DIS
 	csrs	CSR_MVMD1, t0
 	.word	0x62000073	/* hfence.gvma */
+	j	2f
 1:
+	li	t0, K3_A100_VECTOR_L1_BYPASS
+	csrs	CSR_K3_PERF_CTRL, t0
+	li	t0, K3_A100_L2_PREFETCH_DIST
+	csrs	CSR_K3_PREFETCH_CTRL, t0
+	csrci	CSR_ML2HINT, K3_ML2HINT_DEPENDENCY_DIS
+	li	t0, K3_ML2HINT_MERGE_DIS
+	csrs	CSR_ML2HINT, t0
+2:
 	fence	iorw, iorw
 	ret
 
