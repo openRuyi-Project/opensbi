@@ -47,6 +47,8 @@ _spacemit_k3_warm_start:
 	bgeu	t0, t1, 1f
 	li	t0, MISA_EXT_H
 	csrs	misa, t0
+	li	t0, MVMD1_FUSION_TYPE5_DIS
+	csrs	CSR_MVMD1, t0
 	.word	0x62000073	/* hfence.gvma */
 1:
 	j	_start_warm

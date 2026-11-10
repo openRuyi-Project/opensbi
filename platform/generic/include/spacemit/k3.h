@@ -30,6 +30,10 @@
 #define PMACFG0_XIP_FIELD_CLEAR			_UL(0x00ff0000)
 #define PMACFG0_XIP_ATTR_IO			_UL(0x00220000)
 
+/* X100 instruction fusion control. */
+#define CSR_MVMD1				0xbf9
+#define MVMD1_FUSION_TYPE5_DIS			_BITUL(37)
+
 #define CSR_ML2HINT				0x7f7
 #define MISA_EXT_H				_BITUL(7)
 

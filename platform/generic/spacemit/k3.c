@@ -52,6 +52,7 @@ static void spacemit_k3_hart_init(u32 hartid)
 	if (hartid < PLATFORM_A100_FIRST_ID) {
 		/* MISA.H is writable on X100 and not implemented on A100. */
 		csr_set(CSR_MISA, MISA_EXT_H);
+		csr_set(CSR_MVMD1, MVMD1_FUSION_TYPE5_DIS);
 		__sbi_hfence_gvma_all();
 	}
 }
