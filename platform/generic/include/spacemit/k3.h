@@ -30,6 +30,9 @@
 #define PMACFG0_XIP_FIELD_CLEAR			_UL(0x00ff0000)
 #define PMACFG0_XIP_ATTR_IO			_UL(0x00220000)
 
+/* TCM configuration shared by X100 and A100. */
+#define CSR_TCMCFG				0x5db
+
 /* X100 instruction fusion control. */
 #define CSR_MVMD1				0xbf9
 #define MVMD1_FUSION_TYPE5_DIS			_BITUL(37)

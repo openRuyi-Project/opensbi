@@ -41,6 +41,10 @@ static int spacemit_k3_set_vector(unsigned long vector, unsigned long entry)
 	return 0;
 }
 
+#define K3_DCIU_BASE 0xd8440000
+#define K3_DMASYS_RESET (K3_DCIU_BASE + 0x22c)
+#define K3_DMASYS_CLOCK (K3_DCIU_BASE + 0x234)
+
 unsigned long spacemit_k3_prewarm_data[K3_PREWARM_WORDS] __aligned(64);
 
 static bool prewarm_done(void *arg)
@@ -166,6 +170,26 @@ static int spacemit_k3_early_init(bool cold_boot)
 	return spacemit_k3_prepare_hart(current_hartid());
 }
 
+static int spacemit_k3_final_init(bool cold_boot)
+{
+	int rc = generic_final_init(cold_boot);
+
+	if (rc)
+		return rc;
+
+	if (cold_boot) {
+		/* Release DMASYS reset before enabling its clock for TCM access. */
+		writel(readl((void *)K3_DMASYS_RESET) | BIT(0), (void *)K3_DMASYS_RESET);
+		mb();
+		writel(readl((void *)K3_DMASYS_CLOCK) | BIT(0), (void *)K3_DMASYS_CLOCK);
+		/* Finish clock setup before the next stage accesses TCM. */
+		mb();
+	}
+
+	csr_write(CSR_TCMCFG, 1);
+	return 0;
+}
+
 static bool spacemit_k3_cold_boot_allowed(u32 hartid)
 {
 	return !hartid;
@@ -176,6 +200,7 @@ static int spacemit_k3_platform_init(const void *fdt, int nodeoff,
 {
 	_spacemit_k3_hart_init();
 	generic_platform_ops.early_init = spacemit_k3_early_init;
+	generic_platform_ops.final_init = spacemit_k3_final_init;
 	generic_platform_ops.cold_boot_allowed = spacemit_k3_cold_boot_allowed;
 
 	return 0;
