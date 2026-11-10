@@ -24,20 +24,6 @@ static const int cci_map[] = {
 	PLAT_CCI_K3_CLUSTER3_1_IFACE_IX,
 };
 
-/* The boot hart is already running, so it is never started by the HSM. */
-static void spacemit_k3_keep_boot_hart_powered(void)
-{
-	u32 value;
-
-	value = readl((void *)(unsigned long)PMU_CX_CAPMP_IDLE_CFG0);
-	value &= ~CLUSTER_PWR_DOWN_VALUE;
-	writel(value, (void *)(unsigned long)PMU_CX_CAPMP_IDLE_CFG0);
-
-	value = readl((void *)(unsigned long)PMU_AP_CORE0_IDLE_CFG);
-	value &= ~PMU_AP_IDLE_PWRDOWN_K3_MASK;
-	writel(value, (void *)(unsigned long)PMU_AP_CORE0_IDLE_CFG);
-}
-
 /* Program global state before the HSM starts any secondary hart. */
 static int spacemit_k3_pre_init(void)
 {
@@ -62,21 +48,21 @@ static int spacemit_k3_pre_init(void)
 			return rc;
 	}
 
-	spacemit_k3_keep_boot_hart_powered();
-	return 0;
+	return spacemit_k3_prepare_hart(current_hartid());
 }
 
 static int spacemit_k3_early_init(bool cold_boot)
 {
 	int rc;
 
-	if (cold_boot) {
-		rc = spacemit_k3_pre_init();
-		if (rc)
-			return rc;
-	}
+	rc = generic_early_init(cold_boot);
+	if (rc)
+		return rc;
 
-	return generic_early_init(cold_boot);
+	if (cold_boot)
+		return spacemit_k3_pre_init();
+
+	return spacemit_k3_prepare_hart(current_hartid());
 }
 
 static bool spacemit_k3_cold_boot_allowed(u32 hartid)

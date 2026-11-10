@@ -162,12 +162,9 @@ static const unsigned long k3_core_wakeup_reg[] = {
 	PMU_CAP_CORE14_WAKEUP,   PMU_CAP_CORE15_WAKEUP,
 };
 
-static int spacemit_k3_hart_start(u32 hartid, ulong saddr)
+int spacemit_k3_prepare_hart(u32 hartid)
 {
 	u32 value;
-
-	if (saddr != sbi_scratch_thishart_ptr()->warmboot_addr)
-		return SBI_EINVAL;
 
 	if (hartid >= array_size(k3_core_wakeup_reg))
 		return SBI_EINVAL;
@@ -180,8 +177,26 @@ static int spacemit_k3_hart_start(u32 hartid, ulong saddr)
 	value &= ~PMU_AP_IDLE_PWRDOWN_K3_MASK;
 	writel(value, (void *)k3_core_idle_reg[hartid]);
 
-	writel(BIT(hartid), (void *)k3_core_wakeup_reg[hartid]);
+	value = readl((void *)(unsigned long)MPMU_CORE_APCR(hartid));
+	value &= ~MPMU_CORE_APCR_POWERDOWN_VOTES;
+	writel(value, (void *)(unsigned long)MPMU_CORE_APCR(hartid));
 
+	return 0;
+}
+
+static int spacemit_k3_hart_start(u32 hartid, ulong saddr)
+{
+	int rc;
+
+	if (saddr != sbi_scratch_thishart_ptr()->warmboot_addr)
+		return SBI_EINVAL;
+	rc = spacemit_k3_prepare_hart(hartid);
+	if (rc)
+		return rc;
+
+	/* Commit the power-vote updates before asserting wakeup. */
+	mb();
+	writel(BIT(hartid), (void *)k3_core_wakeup_reg[hartid]);
 	return 0;
 }
 
