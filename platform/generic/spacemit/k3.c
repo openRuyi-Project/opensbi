@@ -10,6 +10,9 @@
 #include <platform_override.h>
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_io.h>
+#include <sbi/sbi_error.h>
+#include <sbi/sbi_hart.h>
+#include <sbi/sbi_scratch.h>
 #include <spacemit/k3.h>
 #include <spacemit/k3_asm.h>
 #include <spacemit/spacemit.h>
@@ -27,8 +30,31 @@ static const int cci_map[] = {
 /* Program global state before the HSM starts any secondary hart. */
 static int spacemit_k3_pre_init(void)
 {
+	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
 	unsigned long entry = (unsigned long)&_spacemit_k3_warm_start;
+	unsigned long address, end;
 	int i, rc;
+
+	if (!sbi_hart_has_extension(scratch, SBI_HART_EXT_ZICBOM))
+		return SBI_ENOTSUPP;
+	if (!scratch->fw_size || scratch->fw_start > ~0UL - scratch->fw_size)
+		return SBI_EINVAL;
+
+	/* Coreboot loads OpenSBI with caches enabled. A reset hart fetches
+	 * instructions before enabling snooping, so publish the full image.
+	 */
+	end = scratch->fw_start + scratch->fw_size;
+	address = scratch->fw_start & ~63UL;
+	/* Order cached handoff stores before publishing the firmware. */
+	mb();
+	for (;;) {
+		_spacemit_k3_clean_block(address);
+		if (end - address <= 64)
+			break;
+		address += 64;
+	}
+	/* Complete cache publication before installing reset vectors. */
+	mb();
 
 	writel((u32)entry, (void *)(unsigned long)C0_RVBADDR_LO_ADDR);
 	writel((u32)(entry >> 32), (void *)(unsigned long)C0_RVBADDR_HI_ADDR);

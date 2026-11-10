@@ -68,3 +68,12 @@ _spacemit_k3_hart_init:
 	.globl _spacemit_k3_entry_fault
 _spacemit_k3_entry_fault:
 	j	_spacemit_k3_entry_fault
+
+	/* Publish code before a reset hart fetches it without snooping. */
+	.option push
+	.option arch, +zicbom
+	.globl _spacemit_k3_clean_block
+_spacemit_k3_clean_block:
+	cbo.clean (a0)
+	ret
+	.option pop
