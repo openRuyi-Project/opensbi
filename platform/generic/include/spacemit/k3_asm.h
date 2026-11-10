@@ -12,6 +12,7 @@
 #ifndef __ASSEMBLY__
 void _spacemit_k3_warm_start(void);
 void _spacemit_k3_hart_init(void);
+void _spacemit_k3_prewarm_entry(void);
 void _spacemit_k3_clean_block(unsigned long address);
 #endif
 

@@ -11,6 +11,8 @@
 #include <sbi/riscv_asm.h>
 #include <sbi/riscv_io.h>
 #include <sbi/sbi_error.h>
+#include <sbi/sbi_console.h>
+#include <sbi/sbi_timer.h>
 #include <sbi/sbi_hart.h>
 #include <sbi/sbi_scratch.h>
 #include <spacemit/k3.h>
@@ -36,6 +38,65 @@ static int spacemit_k3_set_vector(unsigned long vector, unsigned long entry)
 	if (readl((void *)vector) != (u32)entry ||
 	    readl((void *)(vector + 4)) != (u32)(entry >> 32))
 		return SBI_EIO;
+	return 0;
+}
+
+unsigned long spacemit_k3_prewarm_data[K3_PREWARM_WORDS] __aligned(64);
+
+static bool prewarm_done(void *arg)
+{
+	const unsigned long *data = arg;
+
+	return readl((void *)data[K3_PREWARM_VECTOR]) == data[K3_PREWARM_VECTOR_LO] &&
+	       readl((void *)(data[K3_PREWARM_VECTOR] + 4)) == data[K3_PREWARM_VECTOR_HI];
+}
+
+static int spacemit_k3_prewarm(void)
+{
+	static const struct {
+		u32 hart;
+		unsigned long idle, wake, vector;
+	} clusters[] = {
+		{ 8, PMU_CAP_CORE8_IDLE_CFG,
+		  PMU_CAP_CORE8_WAKEUP, C2_RVBADDR_LO_ADDR },
+		{ 12, PMU_CAP_CORE12_IDLE_CFG,
+		  PMU_CAP_CORE12_WAKEUP, C3_RVBADDR_LO_ADDR },
+	};
+	unsigned long entry = (unsigned long)_spacemit_k3_prewarm_entry;
+	unsigned long *data = spacemit_k3_prewarm_data;
+	int rc;
+
+	/* Cold init has published the firmware and enabled CCI snooping. */
+	for (u32 i = 0; i < array_size(clusters); i++) {
+		rc = spacemit_k3_prepare_hart(clusters[i].hart);
+		if (rc)
+			return rc;
+
+		data[K3_PREWARM_IDLE] = clusters[i].idle;
+		data[K3_PREWARM_VECTOR] = clusters[i].vector;
+		data[K3_PREWARM_VECTOR_LO] = readl((void *)clusters[i].vector);
+		data[K3_PREWARM_VECTOR_HI] = readl((void *)(clusters[i].vector + 4));
+		/* The restored vector is the completion token; it must differ. */
+		if (data[K3_PREWARM_VECTOR_LO] == (u32)entry &&
+		    data[K3_PREWARM_VECTOR_HI] == (u32)(entry >> 32))
+			return SBI_EINVAL;
+		/* Order context stores before cleaning their cache line. */
+		mb();
+		_spacemit_k3_clean_block((unsigned long)data);
+		/* Publish the context before installing its reset entry. */
+		mb();
+		rc = spacemit_k3_set_vector(clusters[i].vector, entry);
+		if (rc)
+			return rc;
+		writel(BIT(clusters[i].hart), (void *)clusters[i].wake);
+		/* Complete wakeup before polling the MMIO completion token. */
+		mb();
+		if (!sbi_timer_waitms_until(prewarm_done, data, 10)) {
+			sbi_printf("K3: hart %u pre-warm timed out\n", clusters[i].hart);
+			return SBI_ETIMEDOUT;
+		}
+	}
+
 	return 0;
 }
 
@@ -84,7 +145,11 @@ static int spacemit_k3_pre_init(void)
 			return rc;
 	}
 
-	return spacemit_k3_prepare_hart(current_hartid());
+	rc = spacemit_k3_prepare_hart(current_hartid());
+	if (rc)
+		return rc;
+
+	return spacemit_k3_prewarm();
 }
 
 static int spacemit_k3_early_init(bool cold_boot)
