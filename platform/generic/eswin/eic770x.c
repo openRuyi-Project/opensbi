@@ -21,6 +21,7 @@
 
 static struct sbi_hart_protection eswin_eic7700_pmp_protection;
 static volatile bool eic770x_power_down = false;
+static bool use_mpmp;
 
 static int eic770x_hart_start(u32 hartid, ulong saddr)
 {
@@ -167,11 +168,15 @@ static struct sbi_system_reset_device eic7700_reset = {
  *
  * To make the blocker effective for M mode too, the extra PMPs need
  * LOCK bit to be set, and once set, we can't change them later.
- * We also have to to use 1 extra PMP to protect OpenSBI in uncached
+ * Without Memory PMP, we also need 1 extra PMP to protect OpenSBI in uncached
  * memory. EIC770X maps main memory (DRAM) twice -- one in memory
  * port (cached), the other in system port (uncached). P550 doesn't
  * support Svpbmt, so EIC770X use the uncached window to handle DMA
  * that are cache incoherent -- pretty much all peripherals
+ *
+ * With Memory PMP, System Port 1 is non-secure. Memory PMP then blocks the
+ * uncached firmware alias in both M-mode and S-mode. This frees a hart PMP
+ * entry for the security controller, alongside the mailbox reservation.
  *
  * Final PMP configuration:
  *
@@ -234,6 +239,8 @@ static struct sbi_system_reset_device eic7700_reset = {
 static int eswin_eic7700_early_init(bool cold_boot)
 {
 	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+	unsigned long alias_flags = SBI_DOMAIN_MEMREGION_MMIO |
+				    SBI_DOMAIN_MEMREGION_FW;
 	int rc;
 
 	if (!cold_boot)
@@ -249,16 +256,35 @@ static int eswin_eic7700_early_init(bool cold_boot)
 	writel(1, (void*)EIC770X_TL256D2D_IN);
 	asm volatile ("fence o, rw");
 
-	/* Block firmware in uncached memory */
+	if (use_mpmp) {
+		rc = eic770x_mpmp_init(scratch);
+		if (rc)
+			return rc;
+
+		/* Keep direct and BootROM-mediated security configuration in M-mode. */
+		add_root_mem_chk(EIC770X_MBOX_BASE, EIC770X_MBOX_SIZE,
+				 EIC770X_MBOX_SIZE,
+				 (SBI_DOMAIN_MEMREGION_M_READABLE |
+				  SBI_DOMAIN_MEMREGION_M_WRITABLE |
+				  SBI_DOMAIN_MEMREGION_MMIO));
+		add_root_mem_chk(EIC770X_SECURITY_BASE, EIC770X_SECURITY_SIZE,
+				 EIC770X_SECURITY_SIZE,
+				 (SBI_DOMAIN_MEMREGION_M_READABLE |
+				  SBI_DOMAIN_MEMREGION_M_WRITABLE |
+				  SBI_DOMAIN_MEMREGION_MMIO));
+	}
+
+	/* Memory PMP denies all access through the non-secure uncached port. */
+	if (!use_mpmp)
+		alias_flags |= SBI_DOMAIN_MEMREGION_M_READABLE |
+			       SBI_DOMAIN_MEMREGION_M_WRITABLE |
+			       SBI_DOMAIN_MEMREGION_M_EXECUTABLE;
+	/* Block firmware in uncached memory. */
 	add_root_mem_chk(EIC770X_TO_UNCACHED(
 			 scratch->fw_start),
 			 1UL << log2roundup(scratch->fw_size),
 			 1UL << log2roundup(scratch->fw_size),
-			(SBI_DOMAIN_MEMREGION_M_READABLE |
-			 SBI_DOMAIN_MEMREGION_M_WRITABLE |
-			 SBI_DOMAIN_MEMREGION_M_EXECUTABLE |
-			 SBI_DOMAIN_MEMREGION_MMIO |
-			 SBI_DOMAIN_MEMREGION_FW));
+			 alias_flags);
 
 	/* Allow SURW of P550 + System Port */
 	add_root_mem_chk(0,
@@ -300,10 +326,10 @@ static int eswin_eic7700_early_init(bool cold_boot)
 }
 
 #define PMP_FW_START 0
-#define PMP_FW_COUNT 2
-#define PMP_RESERVED_A 2
-#define PMP_FREE_A_START 3
-#define PMP_FREE_A_COUNT 3
+#define PMP_FW_COUNT (use_mpmp ? 1 : 2)
+#define PMP_RESERVED_A PMP_FW_COUNT
+#define PMP_FREE_A_START (PMP_RESERVED_A + 1)
+#define PMP_FREE_A_COUNT (PMP_RESERVED_B - PMP_FREE_A_START)
 #define PMP_RESERVED_B 6
 #define PMP_FREE_B_START 7
 #define PMP_FREE_B_COUNT 1
@@ -311,7 +337,7 @@ static int eswin_eic7700_early_init(bool cold_boot)
 static int eswin_eic7700_final_init(bool cold_boot)
 {
 	/**
-	 * For both dies after final_init:
+	 * Without Memory PMP, both dies use this layout after final_init:
 	 *
 	 *  PMP[0]:   Protect OpenSBI in cached memory
 	 *  PMP[1]:   Protect OpenSBI in uncached memory
@@ -320,6 +346,10 @@ static int eswin_eic7700_final_init(bool cold_boot)
 	 *  PMP[5]:   Temporary enable P550 + System Port
 	 *  PMP[6]:   Block all P550 + System + Memory Port
 	 *  PMP[7-7]: <Free ranges B>
+	 *
+	 * With Memory PMP, the uncached alias does not use a hart PMP entry.
+	 * The remote zero device moves to PMP[1], freeing PMP[2-5] for CLINT,
+	 * mailboxes, security registers and the local memory/IO range.
 	 */
 	struct sbi_domain_memregion *reg;
 	unsigned int pmp_idx = PMP_FW_START,
@@ -346,6 +376,9 @@ static int eswin_eic7700_final_init(bool cold_boot)
 	/* Process firmware regions */
 	sbi_domain_for_each_memregion(&root, reg) {
 		if (!SBI_DOMAIN_MEMREGION_IS_FIRMWARE(reg->flags))
+			continue;
+		/* Memory PMP protects non-secure accesses through the alias. */
+		if (use_mpmp && (reg->flags & SBI_DOMAIN_MEMREGION_MMIO))
 			continue;
 
 		if (pmp_idx >= pmp_max) {
@@ -387,7 +420,7 @@ static int eswin_eic7700_pmp_configure(struct sbi_scratch *scratch,
 	unsigned int pmp_idx, pmp_max;
 	unsigned int i, j;
 
-	/* Process the first free range A [3-5] */
+	/* Process the free entries before the enforced memory-port blocker. */
 	pmp_idx = PMP_FREE_A_START,
 	pmp_max = PMP_FREE_A_START + PMP_FREE_A_COUNT;
 
@@ -489,8 +522,10 @@ static int eswin_eic7700_platform_init(const void *fdt, int nodeoff,
 	generic_platform_ops.final_init = eswin_eic7700_final_init;
 	generic_platform_ops.single_fw_region = eswin_eic7700_single_fw_region;
 
-	if (board_override)
+	if (board_override) {
 		board_reset = board_override->reset_dev;
+		use_mpmp = board_override->use_mpmp;
+	}
 	return 0;
 }
 

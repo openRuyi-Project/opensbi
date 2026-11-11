@@ -117,4 +117,5 @@ static struct sbi_system_reset_device hfp_reset = {
 
 const struct eic770x_board_override hfp_override = {
 	.reset_dev = &hfp_reset,
+	.use_mpmp = true,
 };

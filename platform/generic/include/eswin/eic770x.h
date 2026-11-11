@@ -12,9 +12,13 @@
 
 struct eic770x_board_override {
 	struct sbi_system_reset_device *reset_dev;
+	bool use_mpmp;
 };
 
 void eic770x_cease_other_harts(void);
+
+struct sbi_scratch;
+int eic770x_mpmp_init(const struct sbi_scratch *scratch);
 
 /* CSRs */
 #define EIC770X_CSR_BRPREDICT	0x7c0
@@ -64,6 +68,7 @@ void eic770x_cease_other_harts(void);
 #define EIC770X_SYSCRG(d)	(EIC770X_SYSPORT_BASE(d) + 0x11828000UL)
 #define EIC770X_SYSCRG_LOCAL	(EIC770X_SYSPORT_LOCAL + 0x11828000UL)
 #define EIC770X_SYSCRG_LSPCLK0	(EIC770X_SYSCRG_LOCAL + 0x200UL)
+#define EIC770X_SYSCRG_LSPCLK1	(EIC770X_SYSCRG_LOCAL + 0x204UL)
 #define EIC770X_SYSCRG_MCCLK(d)	(EIC770X_SYSCRG(d) + 0x208UL)
 #define EIC770X_SYSCRG_SYSCLK	(EIC770X_SYSCRG_LOCAL + 0x20cUL)
 #define EIC770X_SYSCRG_SYSRST	(EIC770X_SYSCRG_LOCAL + 0x300UL)
@@ -107,5 +112,11 @@ void eic770x_cease_other_harts(void);
 
 /* Reset definitions */
 #define EIC770X_SYSRST_VAL	0x1AC0FFE6UL
+
+/* Reserve all mailbox channels, so S-mode cannot invoke BootROM services. */
+#define EIC770X_MBOX_BASE		(EIC770X_SYSPORT_LOCAL + 0x10a00000UL)
+#define EIC770X_MBOX_SIZE		0x100000UL
+#define EIC770X_SECURITY_BASE	(EIC770X_SYSPORT_LOCAL + 0x11b00000UL)
+#define EIC770X_SECURITY_SIZE	0x100000UL
 
 #endif
