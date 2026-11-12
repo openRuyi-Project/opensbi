@@ -33,6 +33,9 @@
 #define I2C_TIMEOUT_US	1000
 
 /* K3 clock integration, matching its APBC/MPMU/PLL DT providers. */
+/* PLL1's fixed 2457.6 MHz profile. Restore gates, never retune this PLL. */
+#define K3_PLL1_2457M6_CFG0	0x0b330cccU
+#define K3_PLL1_2457M6_CFG2	0xa0558989U
 #define K3_PLL1_CONFIG0		0x100
 #define K3_PLL1_CONTROL		0x104
 #define K3_PLL1_CONFIG2		0x108
@@ -77,8 +80,8 @@ static int spacemit_k3_prepare(struct spacemit_i2c_adapter *adap)
 
 	if (!adap->apbc)
 		return 0;
-	if (readl((void *)(adap->pll + K3_PLL1_CONFIG0)) != 0x0b330ccc ||
-	    readl((void *)(adap->pll + K3_PLL1_CONFIG2)) != 0xa0558989 ||
+	if (readl((void *)(adap->pll + K3_PLL1_CONFIG0)) != K3_PLL1_2457M6_CFG0 ||
+	    readl((void *)(adap->pll + K3_PLL1_CONFIG2)) != K3_PLL1_2457M6_CFG2 ||
 	    !(readl((void *)(adap->mpmu + K3_PLL_STATUS)) & K3_PLL1_LOCKED))
 		return SBI_EIO;
 	val = readl((void *)(adap->pll + K3_PLL1_CONTROL));
